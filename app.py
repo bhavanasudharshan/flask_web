@@ -1,43 +1,46 @@
 # flask_web/app.py
-from db.mongo_db import conn
+# from db.mongo_db import conn
+from pymongo import MongoClient
 from flask import Flask
 import redis
-import json
+import time
 
 app = Flask(__name__)
 
-redis_host = "localhost"
-redis_port = 6379
-redis_password = ""
+
+
+# redis_host = "localhost"
+# redis_port = 6379
+# redis_password = ""
+cache =  redis.Redis(host='redis',port=6379)
+
 
 @app.route('/')
 def hello_world():
     return 'Hey, we have Flask in a Docker container!'
 
+
 @app.route('/testredis')
 def redis_test():
-    try:
-
-        # The decode_repsonses flag here directs the client to convert the responses from Redis into Python strings
-        # using the default encoding utf-8.  This is client specific.
-        r = redis.StrictRedis(host=redis_host, port=redis_port, password=redis_password, decode_responses=True)
-
-        # step 4: Set the hello message in Redis
-        r.set("msg:hello", "Hello Redis!!!")
-
-        # step 5: Retrieve the hello message from Redis
-        msg = r.get("msg:hello")
-        print(r.execute_command('INFO')['redis_version'])
-        return json.dumps(msg)
-
-    except Exception as e:
-        print(e)
-
+    print("******************************")
+    # return "not workin from docker"
+    retries = 5
+    while True:
+        try:
+            return cache.incr('hits')
+        except redis.exceptions.ConnectionError as exc:
+            if retries == 0:
+                raise exc
+            retries -= 1
+            time.sleep(0.5)
 
 
 @app.route('/testconn')
 def test_conn():
-    return conn.name
+    db_client=MongoClient(host="mongodb")
+    var = db_client["crm"]
+    var.test.insert({'blah':'blah'})
+    return var.name
 
 
 if __name__ == '__main__':
