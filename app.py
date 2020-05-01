@@ -22,17 +22,15 @@ def hello_world():
 
 @app.route('/testredis')
 def redis_test():
-    print("******************************")
-    # return "not workin from docker"
-    retries = 5
-    while True:
-        try:
-            return cache.incr('hits')
-        except redis.exceptions.ConnectionError as exc:
-            if retries == 0:
-                raise exc
-            retries -= 1
-            time.sleep(0.5)
+    try:
+        cache.set("msg:hello", "Hello Redis!!!")
+
+        # step 5: Retrieve the hello message from Redis
+        msg = cache.get("msg:hello")
+        return msg
+    except redis.exceptions.ConnectionError as exc:
+        raise exc
+
 
 
 @app.route('/testconn')
