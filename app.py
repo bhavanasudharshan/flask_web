@@ -2,6 +2,7 @@
 from db.mongo_db import conn
 from flask import Flask
 import redis
+import json
 
 app = Flask(__name__)
 
@@ -26,7 +27,7 @@ def redis_test():
 
         # step 5: Retrieve the hello message from Redis
         msg = r.get("msg:hello")
-        return msg
+        return json.dumps(msg)
 
     except Exception as e:
         print(e)
