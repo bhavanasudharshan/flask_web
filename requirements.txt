@@ -1,4 +1,4 @@
 flask>=1.0.0
 pymongo==3.10.1
-redis
-json
+redis==6.0.0
+json>=3.2

@@ -27,6 +27,7 @@ def redis_test():
 
         # step 5: Retrieve the hello message from Redis
         msg = r.get("msg:hello")
+        print(r.execute_command('INFO')['redis_version'])
         return json.dumps(msg)
 
     except Exception as e:
