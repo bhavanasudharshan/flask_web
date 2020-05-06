@@ -1,20 +1,31 @@
 # flask_web/app.py
+import time
+
 from pymongo import MongoClient
 from flask import Flask,request
 import pika
 from threading import Thread
 import redis
-
 import rediscli
-from background_task import threaded_rmq_consumer_task
+from background_task import threaded_rmq_consumer_task,threaded_rmq_mapper_task
 import json
+from tasks import add, chunkFile
 
 app = Flask(__name__)
 app.config['enable-threads']=True
-# cache = redis.Redis(host='redis', port=6379)
+# app.config['CELERY_BROKER_URL'] = 'redis://localhost:6379/0'
+# app.config['CELERY_RESULT_BACKEND'] = 'redis://localhost:6379/0'
+
+
 thread = Thread(target=threaded_rmq_consumer_task)
 thread.daemon = True
 thread.start()
+
+thread = Thread(target=threaded_rmq_mapper_task)
+thread.daemon = True
+thread.start()
+
+
 
 @app.route('/')
 def hello_world():
@@ -25,8 +36,6 @@ def hello_world():
 def redis_test():
     try:
         rediscli.get_cache().set("msg:hello", "Hello Redis!!!")
-
-        # step 5: Retrieve the hello message from Redis
         msg = rediscli.get_cache().get("msg:hello")
         return msg
     except redis.exceptions.ConnectionError as exc:
@@ -65,4 +74,8 @@ def rmq_recieve(userId):
 
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0')
+    result = add.delay(23, 42)
+    result  =chunkFile.delay()
+    print(result.ready())
+    app.run(debug=False, host='0.0.0.0')
+
