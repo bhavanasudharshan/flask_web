@@ -1,6 +1,8 @@
 hi
 hello
 bye
+rain
+rain
 blowfish
 hi
 hello
@@ -31,8 +33,6 @@ sit
 sit
 color
 rainbow
-rain
-rain
 rain
 rain
 red

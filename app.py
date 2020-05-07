@@ -1,5 +1,6 @@
 # flask_web/app.py
 import time
+from concurrent.futures.thread import ThreadPoolExecutor
 
 from pymongo import MongoClient
 from flask import Flask,request
@@ -7,9 +8,9 @@ import pika
 from threading import Thread
 import redis
 import rediscli
-from background_task import threaded_rmq_consumer_task,threaded_rmq_mapper_task
+from background_task import threaded_rmq_consumer_task
 import json
-from tasks import add, chunkFile
+from tasks import add, chunkFile,threaded_rmq_mapper_task
 
 app = Flask(__name__)
 app.config['enable-threads']=True
@@ -21,9 +22,13 @@ thread = Thread(target=threaded_rmq_consumer_task)
 thread.daemon = True
 thread.start()
 
-thread = Thread(target=threaded_rmq_mapper_task)
-thread.daemon = True
-thread.start()
+executor = ThreadPoolExecutor(max_workers=3)
+executor.submit(threaded_rmq_mapper_task)
+executor.submit(threaded_rmq_mapper_task)
+executor.submit(threaded_rmq_mapper_task)
+# thread = Thread(target=threaded_rmq_mapper_task)
+# thread.daemon = True
+# thread.start()
 
 
 
@@ -47,6 +52,7 @@ def test_conn():
     db_client = MongoClient(host="mongodb")
     var = db_client["crm"]
     var.test.insert({'blah': 'blah'})
+    db_client.close()
     return var.name
 
 
@@ -75,6 +81,7 @@ def rmq_recieve(userId):
 
 if __name__ == '__main__':
     result = add.delay(23, 42)
+
     result  =chunkFile.delay()
     print(result.ready())
     app.run(debug=False, host='0.0.0.0')
