@@ -8,13 +8,13 @@ from pymongo import MongoClient
 
 from background_task import send_to_rabbitMQ
 
-app = Celery('tasks', broker='redis://localhost:6379/0',backend='redis://localhost:6379/0')
+celery = Celery('tasks', broker='redis://localhost:6379/0',backend='redis://localhost:6379/0')
 db_client = MongoClient(host="mongodb")
-@app.task
+@celery.task
 def add(x, y):
     return x + y
 
-@app.task
+@celery.task
 def chunkFile():
     file = "/Users/bsudharshan/PycharmProjects/flask_web/words.txt"
     chunk_size = 8
@@ -57,7 +57,7 @@ def threaded_reducer():
 
     channel.close()
 
-@app.task
+@celery.task
 def reducer(key):
     print('reducer starting for {0}'.format(key))
     mydb = db_client["crm"]
@@ -69,7 +69,7 @@ def reducer(key):
     mydb.results.update_one({"key": key},{"$set": {"count": count}},upsert=True)
     mydb.words.delete_one({'key':key})
 
-@app.task
+@celery.task
 def shuffle(input):
     result={}
     print("in shuffler\n")
@@ -86,7 +86,7 @@ def shuffle(input):
     print(result)
 
 
-@app.task
+@celery.task
 def wordMapper(arr):
     result={}
     for item in arr:
