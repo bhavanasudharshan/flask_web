@@ -1,35 +1,38 @@
 # flask_web/app.py
-import time
 from concurrent.futures.thread import ThreadPoolExecutor
 
 from pymongo import MongoClient
 from flask import Flask,request
 import pika
 from threading import Thread
-import redis
-import rediscli
-from background_task import threaded_rmq_consumer_task
 import json
+
+import redis
+from rediscli import get_cache
+from background_task import threaded_rmq_consumer_task
 from tasks import add, chunkFile,threaded_rmq_mapper_task
 
 app = Flask(__name__)
 app.config['enable-threads']=True
 # app.config['CELERY_BROKER_URL'] = 'redis://localhost:6379/0'
 # app.config['CELERY_RESULT_BACKEND'] = 'redis://localhost:6379/0'
-
-
-thread = Thread(target=threaded_rmq_consumer_task)
-thread.daemon = True
-thread.start()
-
-executor = ThreadPoolExecutor(max_workers=3)
-executor.submit(threaded_rmq_mapper_task)
-executor.submit(threaded_rmq_mapper_task)
-executor.submit(threaded_rmq_mapper_task)
+#
+# app = Celery('tasks', broker='redis://localhost:6379/0',backend='redis://localhost:6379/0')
+# db_client = MongoClient(host="mongodb")
+# thread = Thread(target=threaded_rmq_consumer_task)
+# thread.daemon = True
+# thread.start()
+#
+# executor = ThreadPoolExecutor(max_workers=3)
+# executor.submit(threaded_rmq_mapper_task)
+# executor.submit(threaded_rmq_mapper_task)
+# executor.submit(threaded_rmq_mapper_task)
 # thread = Thread(target=threaded_rmq_mapper_task)
 # thread.daemon = True
 # thread.start()
 
+
+db_client = MongoClient(host="mongodb")
 
 
 @app.route('/')
@@ -40,8 +43,8 @@ def hello_world():
 @app.route('/testredis')
 def redis_test():
     try:
-        rediscli.get_cache().set("msg:hello", "Hello Redis!!!")
-        msg = rediscli.get_cache().get("msg:hello")
+        get_cache().set("msg:hello", "Hello Redis!!!")
+        msg = get_cache().get("msg:hello")
         return msg
     except redis.exceptions.ConnectionError as exc:
         raise exc
@@ -55,6 +58,20 @@ def test_conn():
     db_client.close()
     return var.name
 
+@app.route('/wordcount/<word>',methods=["GET"])
+def word_count(word):
+    cache_result=get_cache().get(word)
+    if cache_result is not None:
+        print("cache hit")
+        return json.dumps({'word':word,'count':cache_result})
+    else:
+        doc=db_client.crm.results.find_one({'key': word})
+        if doc is None:
+            return json.dumps({'word':word,'count':0})
+
+        get_cache().set(word,doc['count'],10)
+        return json.dumps({'word':word,'count':doc['count']})
+
 
 @app.route('/send',methods=["POST"])
 def rmq_send():
@@ -67,22 +84,34 @@ def rmq_send():
     connection.close()
 
 
-    return json.dumps({'thread_name': str(thread.name),
+    return json.dumps({
                     'started. rabbitmq message sent': True})
 
 
 @app.route('/recieve/<userId>',methods=["GET"])
 def rmq_recieve(userId):
-    if rediscli.get_cache().get(userId) is None:
+    if get_cache().get(userId) is None:
         return "found nothing in queue"
     else:
-        return rediscli.get_cache().get(userId)
+        return get_cache().get(userId)
+
+@app.route('/wordcountstart',methods=["POST"])
+def word_count_start():
+    thread = Thread(target=threaded_rmq_consumer_task)
+    thread.daemon = True
+    thread.start()
+
+    executor = ThreadPoolExecutor(max_workers=3)
+    executor.submit(threaded_rmq_mapper_task)
+    executor.submit(threaded_rmq_mapper_task)
+    executor.submit(threaded_rmq_mapper_task)
+    return json.dumps({'start':'success'})
 
 
 if __name__ == '__main__':
     result = add.delay(23, 42)
 
     result  =chunkFile.delay()
-    print(result.ready())
+    # print(result.ready())
     app.run(debug=False, host='0.0.0.0')
 

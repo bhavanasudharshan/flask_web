@@ -1,12 +1,12 @@
 
 import pika
-import rediscli
+from rediscli import get_cache
 import json
 
 
 def callback(ch, method, properties, body):
     b=json.loads(body)
-    rediscli.get_cache().set(b['key'], body)
+    get_cache().set(b['key'], body)
     print(" [x] Received %r" % body)
 
 

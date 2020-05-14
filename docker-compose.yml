@@ -18,4 +18,9 @@ services:
       - "15672:15672"
       - "5672:5672"
       - "5671:5671"
+  worker:
+    build: .
+    hostname: worker
+    entrypoint: celery
+    command: celery -A tasks worker --loglevel=info
 
