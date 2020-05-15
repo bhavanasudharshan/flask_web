@@ -1,5 +1,7 @@
 # flask_web/app.py
+import datetime
 from concurrent.futures.thread import ThreadPoolExecutor
+from time import strftime, gmtime
 
 from pymongo import MongoClient
 from flask import Flask,request
@@ -84,7 +86,7 @@ def rmq_recieve(userId):
 def word_count_start():
     get_cache().set("COUNT",0)
     chunkFile.delay()
-    return json.dumps({'start':'success'})
+    return json.dumps({'start':'success','timestamp':strftime("%Y-%m-%d %H:%M:%S", gmtime())})
 
 
 if __name__ == '__main__':
