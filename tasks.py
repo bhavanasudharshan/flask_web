@@ -1,15 +1,17 @@
 import threading
-import time
 
 import pika
+import time
 from celery import Celery
 from flask import json
 from pymongo import MongoClient
+from rediscli import get_cache
 
 from background_task import send_to_rabbitMQ
 
 celery = Celery('tasks', broker='redis://localhost:6379/0',backend='redis://localhost:6379/0')
 db_client = MongoClient(host="mongodb")
+
 @celery.task
 def add(x, y):
     return x + y
@@ -18,7 +20,6 @@ def add(x, y):
 def chunkFile():
     file = "/Users/bsudharshan/PycharmProjects/flask_web/words.txt"
     chunk_size = 8
-    time.sleep(10)
     words = []
     count = 0
     with open(file=file) as inputfile:
@@ -29,33 +30,30 @@ def chunkFile():
                 print("chunking...")
                 count = 0
                 print(json.dumps(words))
+                get_cache().incr("COUNT")
                 send_to_rabbitMQ(json.dumps(words), "mapper")
                 words = []
 
     if len(words) > 0:
-        send_to_rabbitMQ(str(words), "mapper")
+        get_cache().incr("COUNT")
+        send_to_rabbitMQ(json.dumps(words), "mapper")
 
     thread = threading.Thread(target=threaded_reducer)
     thread.daemon = True
     thread.start()
 
 def threaded_reducer():
-    connection = pika.BlockingConnection(
-        pika.ConnectionParameters(host='rabbitmq'))
-    channel = connection.channel()
-
-    status = channel.queue_declare(queue="mapper")
-    if status.method.message_count == 0:
-        print("mapper queue empty")
-        mydb = db_client["crm"]
-        for doc in mydb.words.find({}):
-            print(doc)
-            reducer.delay(doc['key'])
-            # print(doc['key'])
-    else:
-        print("mapper queue not empty")
-
-    channel.close()
+    while True:
+        c=get_cache().get("COUNT")
+        if int(c)<=0:
+            mydb = db_client["crm"]
+            for doc in mydb.words.find({}):
+                print(doc["key"])
+                reducer.delay(doc['key'])
+            break
+        else:
+            print("reducer waiting to be kicked off")
+            time.sleep(10)
 
 @celery.task
 def reducer(key):
@@ -80,19 +78,20 @@ def shuffle(input):
         newvalues = {"$push": {"value": result[k]}}
         mydb = db_client["crm"]
         mycol = mydb["words"]
-        print("inserting into mongodo")
+        print('shuffler inserting into mongodb  {0}'.format(k))
         mycol.update_one(myquery, newvalues,upsert=True)
 
     print(result)
+    get_cache().decr("COUNT")
 
-
-@celery.task
+# @celery.task
 def wordMapper(arr):
+    print("in word mapper")
     result={}
     for item in arr:
         item=item.strip()
         print(item)
-        print("\n")
+        # print("\n")
         if item in result:
             result[item]=result[item]+1
         else:
@@ -104,12 +103,9 @@ def wordMapper(arr):
 
 def mapper_callback(ch, method, properties, body):
     print(" [x] Received mapper %r" % body)
-    print("Task Executed {}".format(threading.current_thread()))
     print(body.decode('utf8'))
-    result=wordMapper.delay(json.loads(body))
-    # result = add.delay(23, 42)
-    print(result)
-    print("mapping started...")
+    wordMapper(json.loads(body.decode('utf8')))
+    # wordMapper(json.loads(body.decode('utf8'))).delay()
 
 def threaded_rmq_mapper_task():
     connection = pika.BlockingConnection(
@@ -124,25 +120,11 @@ def threaded_rmq_mapper_task():
     print(' [*] Waiting for mapper messages. To exit press CTRL+C')
     channel.start_consuming()
 
-def send_to_reduceMQ(req_data, queue_name):
-    connection = pika.BlockingConnection(pika.ConnectionParameters(host='rabbitmq'))
-
-    channel = connection.channel()
-    channel.queue_declare(queue=queue_name)
-    channel.basic_publish(exchange='',
-                              routing_key=queue_name, body=req_data)
-    connection.close()
-
-
-# def threaded_rmq_reducer_task(queue_name):
-#     connection = pika.BlockingConnection(
-#         pika.ConnectionParameters(host='rabbitmq'))
+# def send_to_reduceMQ(req_data, queue_name):
+#     connection = pika.BlockingConnection(pika.ConnectionParameters(host='rabbitmq'))
+#
 #     channel = connection.channel()
-#
 #     channel.queue_declare(queue=queue_name)
-#
-#     channel.basic_consume(
-#         queue=queue_name, on_message_callback=mapper_callback, auto_ack=True)
-#
-#     print(' [*] Waiting for reducer messages. To exit press CTRL+C')
-#     channel.start_consuming()
+#     channel.basic_publish(exchange='',
+#                               routing_key=queue_name, body=req_data)
+#     connection.close()
