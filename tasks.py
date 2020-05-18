@@ -1,7 +1,6 @@
-import threading
+from concurrent.futures.thread import ThreadPoolExecutor
 
 import pika
-import time
 from celery import Celery
 from flask import json
 from pymongo import MongoClient
@@ -9,103 +8,93 @@ from rediscli import get_cache
 
 from background_task import send_to_rabbitMQ
 
-celery = Celery('tasks', broker='redis://localhost:6379/0',backend='redis://localhost:6379/0')
+celery = Celery('tasks', broker='amqp://guest@localhost//', backend='amqp://guest@localhost//')
 db_client = MongoClient(host="mongodb")
+executor = ThreadPoolExecutor(max_workers=3)
+
 
 @celery.task
 def add(x, y):
     return x + y
 
+
 @celery.task
-def chunkFile():
+def createMapperJobs():
     file = "/Users/bsudharshan/PycharmProjects/flask_web/words.txt"
-    chunk_size = 8
-    words = []
-    count = 0
-    with open(file=file) as inputfile:
-        for line in inputfile:
-            words.append(line)
-            count = count + 1
-            if count == chunk_size:
-                print("chunking...")
-                count = 0
-                print(json.dumps(words))
-                get_cache().incr("COUNT")
-                send_to_rabbitMQ(json.dumps(words), "mapper")
-                words = []
+    for i in range(0, 1):
+        lines = []
+        with open(file=file) as inputfile:
+            for line in inputfile:
+                lines.append(line)
+            print("creating a mapper job {}")
+            print(json.dumps(lines))
+            get_cache().incr("COUNT")
+            send_to_rabbitMQ(json.dumps(lines), "mapper")
 
-    if len(words) > 0:
-        get_cache().incr("COUNT")
-        send_to_rabbitMQ(json.dumps(words), "mapper")
+    # start the mapper consumer threads once the total jobs are tracked
+    executor.submit(threaded_rmq_mapper_task)
+    executor.submit(threaded_rmq_mapper_task)
+    executor.submit(threaded_rmq_mapper_task)
 
-    thread = threading.Thread(target=threaded_reducer)
-    thread.daemon = True
-    thread.start()
-
-def threaded_reducer():
-    while True:
-        c=get_cache().get("COUNT")
-        if int(c)<=0:
-            mydb = db_client["crm"]
-            for doc in mydb.words.find({}):
-                print(doc["key"])
-                reducer.delay(doc['key'])
-            break
-        else:
-            print("reducer waiting to be kicked off")
-            time.sleep(10)
 
 @celery.task
 def reducer(key):
-    print('reducer starting for {0}'.format(key))
+    print("starting reducer job {0}".format(key))
     mydb = db_client["crm"]
+    results_collection=mydb["results"]
+    reducer_entry = mydb["reducerKeys"].find_one({'key':key})
+
     count=0
-    document = mydb.words.find_one({'key':key})
-    for v in document['value']:
-        count=count+v
-    print("result of reducer for key {0}={1}".format(key,count))
-    mydb.results.update_one({"key": key},{"$set": {"count": count}},upsert=True)
-    mydb.words.delete_one({'key':key})
+
+    for c in reducer_entry['value']:
+        print("count incrementing for reducer {0}".format(key))
+        count=count+c
+    results_collection.update({"key": key}, {'$set':{"value": count}}, upsert=True)
+    print("reducer finishing for key {0} output {1}".format(key,c))
+
 
 @celery.task
-def shuffle(input):
-    result={}
-    print("in shuffler\n")
-    sortedKeys=sorted(input)
-    for k in sortedKeys:
-        result[k]=input[k]
-        myquery = {"key": k}
-        newvalues = {"$push": {"value": result[k]}}
-        mydb = db_client["crm"]
-        mycol = mydb["words"]
-        print('shuffler inserting into mongodb  {0}'.format(k))
-        mycol.update_one(myquery, newvalues,upsert=True)
+def shuffle():
+    reducer_job_keys={}
 
-    print(result)
-    get_cache().decr("COUNT")
+    mydb = db_client["crm"]
+    reducer_collection=mydb["reducerKeys"]
 
-# @celery.task
+    mapper_output = mydb["mapperOutput"]
+    for item in mapper_output.find():
+        print(item)
+        if item['key'] not in reducer_job_keys:
+            reducer_job_keys[(item['key'])]=True
+        reducer_collection.update_one({"key": item['key']}, {"$push": {"value": item['value']}}, upsert=True)
+
+    for key in reducer_job_keys:
+        reducer.delay(key)
+
+
 def wordMapper(arr):
     print("in word mapper")
-    result={}
+    mydb = db_client["crm"]
+    mapperOutput = mydb["mapperOutput"]
     for item in arr:
-        item=item.strip()
-        print(item)
-        # print("\n")
-        if item in result:
-            result[item]=result[item]+1
-        else:
-            result[item]=1
-    print(result)
-    print("mapresult")
-    shuffle.delay(result)
+        item = item.strip()
+        mapperOutput.insert_one({'key': item, 'value': 1})
+        print('inserting into mapperOutput {0}'.format(item))
+
+    get_cache().decr("COUNT")
+    count=get_cache().get("COUNT")
+
+    if count == "0":
+        print("finished processing all mapper jobs, shuffler task starting")
+        shuffle.delay()
+    else:
+        print("remaining mapper jobs to be processed {0} {1} {2}".format(count,count=="0",count==0))
 
 
 def mapper_callback(ch, method, properties, body):
     print(" [x] Received mapper %r" % body)
     print(body.decode('utf8'))
     wordMapper(json.loads(body.decode('utf8')))
-    # wordMapper(json.loads(body.decode('utf8'))).delay()
+
 
 def threaded_rmq_mapper_task():
     connection = pika.BlockingConnection(
@@ -119,12 +108,3 @@ def threaded_rmq_mapper_task():
 
     print(' [*] Waiting for mapper messages. To exit press CTRL+C')
     channel.start_consuming()
-
-# def send_to_reduceMQ(req_data, queue_name):
-#     connection = pika.BlockingConnection(pika.ConnectionParameters(host='rabbitmq'))
-#
-#     channel = connection.channel()
-#     channel.queue_declare(queue=queue_name)
-#     channel.basic_publish(exchange='',
-#                               routing_key=queue_name, body=req_data)
-#     connection.close()

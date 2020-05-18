@@ -1,25 +1,18 @@
 # flask_web/app.py
-import datetime
-from concurrent.futures.thread import ThreadPoolExecutor
 from time import strftime, gmtime
 
 from pymongo import MongoClient
-from flask import Flask,request
+from flask import Flask, request
 import pika
 import json
 
 import redis
 from rediscli import get_cache
-from tasks import chunkFile,threaded_rmq_mapper_task
+from tasks import createMapperJobs, threaded_rmq_mapper_task
 
 app = Flask(__name__)
-app.config['enable-threads']=True
+app.config['enable-threads'] = True
 db_client = MongoClient(host="mongodb")
-
-executor = ThreadPoolExecutor(max_workers=3)
-executor.submit(threaded_rmq_mapper_task)
-executor.submit(threaded_rmq_mapper_task)
-executor.submit(threaded_rmq_mapper_task)
 
 
 @app.route('/')
@@ -45,22 +38,23 @@ def test_conn():
     db_client.close()
     return var.name
 
-@app.route('/wordcount/<word>',methods=["GET"])
+
+@app.route('/wordcount/<word>', methods=["GET"])
 def word_count(word):
-    cache_result=get_cache().get(word)
+    cache_result = get_cache().get(word)
     if cache_result is not None:
         print("cache hit")
-        return json.dumps({'word':word,'count':cache_result})
+        return json.dumps({'word': word, 'count': cache_result})
     else:
-        doc=db_client.crm.results.find_one({'key': word})
+        doc = db_client.crm.results.find_one({'key': word})
         if doc is None:
-            return json.dumps({'word':word,'count':0})
+            return json.dumps({'word': word, 'count': 0})
 
-        get_cache().set(word,doc['count'],10)
-        return json.dumps({'word':word,'count':doc['count']})
+        get_cache().set(word, doc['value'])
+        return json.dumps({'word': word, 'count': doc['value']})
 
 
-@app.route('/send',methods=["POST"])
+@app.route('/send', methods=["POST"])
 def rmq_send():
     req_data = request.form
     connection = pika.BlockingConnection(pika.ConnectionParameters(host='rabbitmq'))
@@ -70,25 +64,34 @@ def rmq_send():
                           routing_key='hello', body=json.dumps(req_data))
     connection.close()
 
-
     return json.dumps({
-                    'started. rabbitmq message sent': True})
+        'started. rabbitmq message sent': True})
 
 
-@app.route('/recieve/<userId>',methods=["GET"])
+@app.route('/recieve/<userId>', methods=["GET"])
 def rmq_recieve(userId):
     if get_cache().get(userId) is None:
         return "found nothing in queue"
     else:
         return get_cache().get(userId)
 
-@app.route('/wordcountstart',methods=["POST"])
+
+@app.route('/wordcountstart', methods=["POST"])
 def word_count_start():
-    get_cache().set("COUNT",0)
-    chunkFile.delay()
-    return json.dumps({'start':'success','timestamp':strftime("%Y-%m-%d %H:%M:%S", gmtime())})
+    if get_cache().get("COUNT") != "0":
+        if 'force' not in request.form or request.form['force'] != "true":
+            return json.dumps({"fail": "previous job still in progress. to force try set force=true"})
+        else:
+            print("forcing job")
+
+    get_cache().set("COUNT","0")
+    db_client["crm"].drop_collection("mapperOutput")
+    db_client["crm"].drop_collection("reducerKeys")
+    db_client["crm"].drop_collection("results")
+
+    createMapperJobs.delay()
+    return json.dumps({'start': 'success', 'timestamp': strftime("%Y-%m-%d %H:%M:%S", gmtime())})
 
 
 if __name__ == '__main__':
     app.run(debug=False, host='0.0.0.0')
-
