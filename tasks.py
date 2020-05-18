@@ -8,7 +8,7 @@ from rediscli import get_cache
 
 from background_task import send_to_rabbitMQ
 
-celery = Celery('tasks', broker='amqp://guest@localhost//', backend='amqp://guest@localhost//')
+celery = Celery('tasks', broker='amqp://guest@rabbitmq//', backend='amqp://guest@rabbitmq//')
 db_client = MongoClient(host="mongodb")
 executor = ThreadPoolExecutor(max_workers=3)
 
@@ -20,8 +20,8 @@ def add(x, y):
 
 @celery.task
 def createMapperJobs():
-    file = "/Users/bsudharshan/PycharmProjects/flask_web/words.txt"
-    for i in range(0, 1):
+    file = "/app/words.txt"
+    for i in range(0, 1000):
         lines = []
         with open(file=file) as inputfile:
             for line in inputfile:

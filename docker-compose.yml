@@ -18,9 +18,17 @@ services:
       - "15672:15672"
       - "5672:5672"
       - "5671:5671"
+    healthcheck:
+        test: [ "CMD", "nc", "-z", "localhost", "5672" ]
+        interval: 30s
+        timeout: 10s
+        retries: 5
   worker:
     build: .
     hostname: worker
     entrypoint: celery
-    command: celery -A tasks worker --loglevel=info
+    command: -A tasks worker --loglevel=info
+    restart: on-failure
+    depends_on:
+      - rabbitmq
 

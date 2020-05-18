@@ -50,7 +50,7 @@ def word_count(word):
         if doc is None:
             return json.dumps({'word': word, 'count': 0})
 
-        get_cache().set(word, doc['value'])
+        get_cache().set(word, doc['value'],ex=5)
         return json.dumps({'word': word, 'count': doc['value']})
 
 
