@@ -4,9 +4,18 @@ import pika
 from celery import Celery
 from flask import json
 from pymongo import MongoClient
-from rediscli import get_cache
 
-from background_task import send_to_rabbitMQ
+try:
+    from .rediscli import get_cache
+except ImportError:
+    from rediscli import get_cache
+
+try:
+    from .background_task import send_to_rabbitMQ
+except ImportError:
+    from background_task import send_to_rabbitMQ
+
+
 
 celery = Celery('tasks', broker='amqp://guest@rabbitmq//', backend='amqp://guest@rabbitmq//')
 db_client = MongoClient(host="mongodb")
@@ -41,30 +50,30 @@ def createMapperJobs():
 def reducer(key):
     print("starting reducer job {0}".format(key))
     mydb = db_client["crm"]
-    results_collection=mydb["results"]
-    reducer_entry = mydb["reducerKeys"].find_one({'key':key})
+    results_collection = mydb["results"]
+    reducer_entry = mydb["reducerKeys"].find_one({'key': key})
 
-    count=0
+    count = 0
 
     for c in reducer_entry['value']:
         print("count incrementing for reducer {0}".format(key))
-        count=count+c
-    results_collection.update({"key": key}, {'$set':{"value": count}}, upsert=True)
-    print("reducer finishing for key {0} output {1}".format(key,c))
+        count = count + c
+    results_collection.update({"key": key}, {'$set': {"value": count}}, upsert=True)
+    print("reducer finishing for key {0} output {1}".format(key, c))
 
 
 @celery.task
 def shuffle():
-    reducer_job_keys={}
+    reducer_job_keys = {}
 
     mydb = db_client["crm"]
-    reducer_collection=mydb["reducerKeys"]
+    reducer_collection = mydb["reducerKeys"]
 
     mapper_output = mydb["mapperOutput"]
     for item in mapper_output.find():
         print(item)
         if item['key'] not in reducer_job_keys:
-            reducer_job_keys[(item['key'])]=True
+            reducer_job_keys[(item['key'])] = True
         reducer_collection.update_one({"key": item['key']}, {"$push": {"value": item['value']}}, upsert=True)
 
     for key in reducer_job_keys:
@@ -81,13 +90,13 @@ def wordMapper(arr):
         print('inserting into mapperOutput {0}'.format(item))
 
     get_cache().decr("COUNT")
-    count=get_cache().get("COUNT")
+    count = get_cache().get("COUNT")
 
     if count == "0":
         print("finished processing all mapper jobs, shuffler task starting")
         shuffle.delay()
     else:
-        print("remaining mapper jobs to be processed {0} {1} {2}".format(count,count=="0",count==0))
+        print("remaining mapper jobs to be processed {0} {1} {2}".format(count, count == "0", count == 0))
 
 
 def mapper_callback(ch, method, properties, body):

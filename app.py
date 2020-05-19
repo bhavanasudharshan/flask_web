@@ -1,14 +1,20 @@
 # flask_web/app.py
+import json
 from time import strftime, gmtime
 
-from pymongo import MongoClient
-from flask import Flask, request
 import pika
-import json
-
 import redis
-from rediscli import get_cache
-from tasks import createMapperJobs, threaded_rmq_mapper_task
+from flask import Flask, request
+from pymongo import MongoClient
+try:
+    from .rediscli import get_cache
+except ImportError:
+    from rediscli import get_cache
+
+try:
+    from .tasks import createMapperJobs
+except ImportError:
+    from tasks import createMapperJobs
 
 app = Flask(__name__)
 app.config['enable-threads'] = True
@@ -50,7 +56,7 @@ def word_count(word):
         if doc is None:
             return json.dumps({'word': word, 'count': 0})
 
-        get_cache().set(word, doc['value'],ex=5)
+        get_cache().set(word, doc['value'], ex=5)
         return json.dumps({'word': word, 'count': doc['value']})
 
 
@@ -84,7 +90,7 @@ def word_count_start():
         else:
             print("forcing job")
 
-    get_cache().set("COUNT","0")
+    get_cache().set("COUNT", "0")
     db_client["crm"].drop_collection("mapperOutput")
     db_client["crm"].drop_collection("reducerKeys")
     db_client["crm"].drop_collection("results")

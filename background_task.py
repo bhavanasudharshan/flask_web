@@ -1,11 +1,15 @@
+import json
 
 import pika
-from rediscli import get_cache
-import json
+
+try:
+    from .rediscli import get_cache
+except ImportError:
+    from rediscli import get_cache
 
 
 def callback(ch, method, properties, body):
-    b=json.loads(body)
+    b = json.loads(body)
     get_cache().set(b['key'], body)
     print(" [x] Received %r" % body)
 
@@ -24,11 +28,11 @@ def threaded_rmq_consumer_task():
     channel.start_consuming()
 
 
-def send_to_rabbitMQ(req_data,queue_name):
+def send_to_rabbitMQ(req_data, queue_name):
     connection = pika.BlockingConnection(pika.ConnectionParameters(host='rabbitmq'))
 
     channel = connection.channel()
     channel.queue_declare(queue=queue_name)
     channel.basic_publish(exchange='',
-                      routing_key=queue_name, body=req_data)
+                          routing_key=queue_name, body=req_data)
     connection.close()
