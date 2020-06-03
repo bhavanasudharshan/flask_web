@@ -27,7 +27,8 @@ services:
     build: .
     hostname: worker
     entrypoint: celery
-    command: -A tasks worker --loglevel=info
+    command: -A app worker --loglevel=info
+    user: nobody
     restart: on-failure
     depends_on:
       - rabbitmq
